@@ -49,3 +49,54 @@ find_library(log-lib log)
 target_link_libraries(hdrstacker
         raw
         ${log-lib})
+
+# ---------------------------------------------------------------------------
+# Panorama stitching (Stage 1).
+#
+# The Maven OpenCV artifact ships every module EXCEPT `stitching`, but its
+# prebuilt libopencv_java4.so *does* export the cv:: symbols that stitching
+# depends on (core/imgproc/features2d/calib3d/flann). So we compile only the
+# stitching module's own sources from the matching OpenCV source tag and link
+# them against the prebuilt library exposed through the AAR's prefab package.
+# This keeps the HDR path and the OpenCV dependency untouched.
+#
+# `find_package(OpenCV)` here resolves to the prefab-generated config (enabled
+# by android.buildFeatures.prefab); the imported target is OpenCV::opencv_java4.
+# ---------------------------------------------------------------------------
+find_package(OpenCV REQUIRED CONFIG)
+
+FetchContent_Declare(
+        opencv_src
+        URL "https://github.com/opencv/opencv/archive/refs/tags/4.11.0.tar.gz"
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+)
+FetchContent_MakeAvailable(opencv_src)
+
+# Generated headers OpenCV's own build would normally produce. Empty/minimal
+# is correct for our reduced, single-module compile (no CUDA/OpenCL/IPP).
+set(OCV_GEN "${CMAKE_CURRENT_BINARY_DIR}/ocv_gen")
+file(MAKE_DIRECTORY "${OCV_GEN}/opencv2")
+file(WRITE "${OCV_GEN}/opencv2/opencv_modules.hpp"
+        "#define HAVE_OPENCV_CORE\n#define HAVE_OPENCV_IMGPROC\n#define HAVE_OPENCV_FEATURES2D\n#define HAVE_OPENCV_CALIB3D\n#define HAVE_OPENCV_FLANN\n#define HAVE_OPENCV_STITCHING\n")
+file(WRITE "${OCV_GEN}/cvconfig.h" "")
+file(WRITE "${OCV_GEN}/cv_cpu_config.h" "#define CV_CPU_COMPILE_BASELINE 1\n#define CV_CPU_BASELINE_MODE 1\n")
+file(WRITE "${OCV_GEN}/opencl_kernels_stitching.hpp" "")
+
+file(GLOB STITCH_SOURCES "${opencv_src_SOURCE_DIR}/modules/stitching/src/*.cpp")
+list(FILTER STITCH_SOURCES EXCLUDE REGEX ".*warpers_cuda\\.cpp$")
+
+add_library(panostitcher SHARED native-stitch.cpp ${STITCH_SOURCES})
+target_compile_definitions(panostitcher PRIVATE __OPENCV_BUILD=1)
+target_include_directories(panostitcher PRIVATE
+        "${OCV_GEN}"
+        "${opencv_src_SOURCE_DIR}/modules/stitching/include"
+        "${opencv_src_SOURCE_DIR}/modules/stitching/src"
+        "${opencv_src_SOURCE_DIR}/modules/core/include"
+        "${opencv_src_SOURCE_DIR}/modules/imgproc/include"
+        "${opencv_src_SOURCE_DIR}/modules/features2d/include"
+        "${opencv_src_SOURCE_DIR}/modules/calib3d/include"
+        "${opencv_src_SOURCE_DIR}/modules/flann/include")
+target_compile_options(panostitcher PRIVATE -w)
+target_link_libraries(panostitcher
+        OpenCV::opencv_java4
+        ${log-lib})

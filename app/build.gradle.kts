@@ -58,6 +58,9 @@ android {
     }
     buildFeatures {
         compose = true
+        // Exposes the OpenCV AAR's prebuilt native library + headers to CMake,
+        // so the panorama module can link the stitching sources against it.
+        prefab = true
     }
     packaging {
         resources {

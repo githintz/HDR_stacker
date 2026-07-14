@@ -16,7 +16,6 @@ import org.opencv.android.OpenCVLoader
 import org.opencv.android.Utils
 import org.opencv.core.Mat
 import org.opencv.imgproc.Imgproc
-import org.opencv.stitching.Stitcher
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -117,12 +116,12 @@ object PanoramaEngine {
                 images.add(rgb)
             }
 
-            // ---- 2. Stitch ----
+            // ---- 2. Stitch (native OpenCV Stitcher; see NativeStitch) ----
             coroutineContext.ensureActive()
             onProgress(sources.size / (sources.size + 2f), "Stitching panorama")
             val pano = Mat()
             val status = try {
-                Stitcher.create(Stitcher.PANORAMA).stitch(images, pano)
+                NativeStitch.nativeStitch(images.map { it.nativeObj }.toLongArray(), pano.nativeObj)
             } catch (t: Throwable) {
                 pano.release()
                 if (t is kotlinx.coroutines.CancellationException) throw t
@@ -131,7 +130,7 @@ object PanoramaEngine {
                     "Stitching failed: ${t.message ?: t.javaClass.simpleName}",
                 )
             }
-            if (status != Stitcher.OK) {
+            if (status != NativeStitch.OK) {
                 pano.release()
                 throw statusToException(status)
             }
@@ -153,17 +152,17 @@ object PanoramaEngine {
     }
 
     private fun statusToException(status: Int): PanoramaException = when (status) {
-        Stitcher.ERR_NEED_MORE_IMGS -> PanoramaException(
+        NativeStitch.ERR_NEED_MORE_IMGS -> PanoramaException(
             PanoramaError.NOT_ENOUGH_OVERLAP,
             "Couldn't find enough overlap between the photos. Use shots that " +
                 "overlap by roughly 30–50% and try again.",
         )
-        Stitcher.ERR_HOMOGRAPHY_EST_FAIL -> PanoramaException(
+        NativeStitch.ERR_HOMOGRAPHY_EST_FAIL -> PanoramaException(
             PanoramaError.NOT_ENOUGH_OVERLAP,
             "Couldn't match features between the photos. They may not overlap " +
                 "enough, or the scene is too flat/repetitive.",
         )
-        Stitcher.ERR_CAMERA_PARAMS_ADJUST_FAIL -> PanoramaException(
+        NativeStitch.ERR_CAMERA_PARAMS_ADJUST_FAIL -> PanoramaException(
             PanoramaError.CAMERA_PARAMS_FAILED,
             "Matched the photos but couldn't solve the camera geometry. Try " +
                 "shots taken by rotating on the spot rather than moving sideways.",
