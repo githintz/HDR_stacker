@@ -60,8 +60,8 @@ Requirements:
 - **Android Studio** (Ladybug / 2024.2 or newer) with the **Android SDK**,
   **NDK**, and **CMake** components installed (SDK Manager → SDK Tools).
 - A device or emulator running **Android 10 (API 29)** or newer.
-- **Network access on the first native build** — the CMake script downloads and
-  compiles LibRaw the first time. OpenCV comes from Maven Central
+- **Network access on the first native build** — the CMake script clones and
+  compiles LibRaw (from GitHub) the first time. OpenCV comes from Maven Central
   (`org.opencv:opencv:4.11.0`, which ships the native `.so`).
 
 Then:
@@ -78,10 +78,10 @@ Or just open the project in Android Studio and press Run.
 
 ### Offline / vendored LibRaw
 
-The first native build fetches LibRaw from libraw.org and the CMake overlay from
-GitHub. To build without network access, vendor LibRaw yourself and adjust
-`app/src/main/cpp/CMakeLists.txt` to `add_subdirectory` your local copy instead
-of the `FetchContent` block.
+The first native build clones LibRaw from GitHub (tag `0.21.4`) via CMake
+`FetchContent`. To build without network access, vendor the LibRaw source under
+`app/src/main/cpp/third_party/LibRaw` and point `libraw_SOURCE_DIR` at it
+instead of the `FetchContent` block in `app/src/main/cpp/CMakeLists.txt`.
 
 ## Usage
 
