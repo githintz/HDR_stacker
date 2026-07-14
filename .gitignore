@@ -1,0 +1,19 @@
+# Android / Gradle
+*.iml
+.gradle/
+/local.properties
+/.idea/
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx/
+**/build/
+
+# Native fetch/build caches
+app/.cxx/
+app/src/main/cpp/third_party/
+
+# Keystores / secrets
+*.jks
+*.keystore

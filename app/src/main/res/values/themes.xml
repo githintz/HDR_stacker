@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Launch theme only. The real UI is themed by Compose (HdrStackerTheme);
+      this exists so the app has a valid window theme before Compose takes over.
+      values-night/ supplies the dark variant.
+    -->
+    <style name="Theme.HdrStacker" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>
