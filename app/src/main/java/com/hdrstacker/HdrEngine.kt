@@ -102,16 +102,17 @@ object HdrEngine {
             }
 
             // ---- 2. Align hand-held brackets ----
+            // Align in place, matching OpenCV's own HDR tutorial. Passing a
+            // separate output list is unreliable: the Java binding does not
+            // populate a fresh list, leaving it empty and crashing the merge
+            // with "checkImageDimensions !images.empty()".
             coroutineContext.ensureActive()
             onProgress(sources.size / (sources.size + 2f), "Aligning frames")
-            val aligned = ArrayList<Mat>(mats.size)
-            Photo.createAlignMTB().process(mats, aligned)
-            mats.forEach { it.release() }
-            mats.clear()
-            mats.addAll(aligned)
+            Photo.createAlignMTB().process(mats, mats)
 
             // ---- 3. Fuse ----
             coroutineContext.ensureActive()
+            check(mats.isNotEmpty()) { "Alignment produced no frames" }
             onProgress((sources.size + 1) / (sources.size + 2f), "Merging HDR")
             val result8 = when (mode) {
                 FusionMode.EXPOSURE_FUSION -> mertens(mats)
