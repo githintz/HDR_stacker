@@ -65,10 +65,13 @@ target_link_libraries(hdrstacker
 # ---------------------------------------------------------------------------
 find_package(OpenCV REQUIRED CONFIG)
 
+# Git clone (shallow) rather than the archive tarball: the tarball download
+# fails in CI, whereas a shallow clone of the tag is reliable (same as LibRaw).
 FetchContent_Declare(
         opencv_src
-        URL "https://github.com/opencv/opencv/archive/refs/tags/4.11.0.tar.gz"
-        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+        GIT_REPOSITORY "https://github.com/opencv/opencv.git"
+        GIT_TAG "4.11.0"
+        GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(opencv_src)
 
