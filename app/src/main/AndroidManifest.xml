@@ -10,7 +10,7 @@
         android:theme="@style/Theme.HdrStacker">
 
         <activity
-            android:name=".MainActivity"
+            android:name=".HomeActivity"
             android:exported="true"
             android:label="@string/app_name"
             android:theme="@style/Theme.HdrStacker">
@@ -19,6 +19,20 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- HDR feature (unchanged); now launched from HomeActivity. -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="false"
+            android:label="HDR Stacker"
+            android:theme="@style/Theme.HdrStacker" />
+
+        <!-- Stage 1: panorama stitching. -->
+        <activity
+            android:name=".panorama.PanoramaActivity"
+            android:exported="false"
+            android:label="Panorama Stitcher"
+            android:theme="@style/Theme.HdrStacker" />
 
     </application>
 
