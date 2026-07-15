@@ -118,16 +118,23 @@ object HdrEngine {
             onProgress(sources.size / (sources.size + 2f), "Aligning frames")
             run {
                 val align = Photo.createAlignMTB()
-                val reference = mats[0]
+                // calculateShift requires single-channel input, so compute the
+                // shift on grayscale versions and apply it to the colour frame.
+                val refGray = Mat()
+                Imgproc.cvtColor(mats[0], refGray, Imgproc.COLOR_RGB2GRAY)
                 val aligned = ArrayList<Mat>(mats.size)
-                aligned.add(reference.clone())              // reference: unshifted
+                aligned.add(mats[0].clone())                // reference: unshifted
                 for (i in 1 until mats.size) {
                     coroutineContext.ensureActive()
-                    val shift = align.calculateShift(reference, mats[i])
+                    val gray = Mat()
+                    Imgproc.cvtColor(mats[i], gray, Imgproc.COLOR_RGB2GRAY)
+                    val shift = align.calculateShift(refGray, gray)
+                    gray.release()
                     val shifted = Mat()
-                    align.shiftMat(mats[i], shifted, shift)
+                    align.shiftMat(mats[i], shifted, shift)  // shift the colour frame
                     aligned.add(shifted)
                 }
+                refGray.release()
                 mats.forEach { it.release() }
                 mats.clear()
                 mats.addAll(aligned)
