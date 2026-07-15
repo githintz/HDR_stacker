@@ -25,6 +25,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Panorama
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -34,7 +36,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -56,15 +57,26 @@ class PanoramaActivity : ComponentActivity() {
         setContent {
             HdrStackerTheme {
                 val state by vm.state.collectAsStateWithLifecycle()
-                PanoramaScreen(
-                    state = state,
-                    onPick = { pickImages.launch(arrayOf("image/*")) },
-                    onRemove = vm::removeFrame,
-                    onClear = vm::clearFrames,
-                    onStitch = vm::stitch,
-                    onCancel = vm::cancel,
-                    onOpenResult = ::openInGallery,
-                )
+                val pending = state.stitched
+                if (pending != null) {
+                    CropScreen(
+                        bitmap = pending,
+                        busy = state.running,
+                        onSave = { rect -> vm.confirmCrop(rect) },
+                        onDiscard = { vm.discardStitched() },
+                    )
+                } else {
+                    PanoramaScreen(
+                        state = state,
+                        onPick = { pickImages.launch(arrayOf("image/*")) },
+                        onRemove = vm::removeFrame,
+                        onClear = vm::clearFrames,
+                        onProjection = vm::setProjection,
+                        onStitch = vm::stitch,
+                        onCancel = vm::cancel,
+                        onOpenResult = ::openInGallery,
+                    )
+                }
             }
         }
     }
@@ -90,6 +102,7 @@ private fun PanoramaScreen(
     onPick: () -> Unit,
     onRemove: (Uri) -> Unit,
     onClear: () -> Unit,
+    onProjection: (NativeStitch.Projection) -> Unit,
     onStitch: () -> Unit,
     onCancel: () -> Unit,
     onOpenResult: (PanoramaResult) -> Unit,
@@ -120,6 +133,8 @@ private fun PanoramaScreen(
                     OutlinedButton(onClick = onClear, enabled = !state.running) { Text("Clear") }
                 }
             }
+
+            ProjectionCard(state.projection, onProjection, enabled = !state.running)
 
             LazyColumn(
                 Modifier.fillMaxWidth().weight(1f, fill = false),
@@ -185,6 +200,51 @@ private fun PanoramaScreen(
                 }
             }
             Spacer(Modifier.size(8.dp))
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ProjectionCard(
+    projection: NativeStitch.Projection,
+    onProjection: (NativeStitch.Projection) -> Unit,
+    enabled: Boolean,
+) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Projection", style = MaterialTheme.typography.labelLarge)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = projection == NativeStitch.Projection.SPHERICAL,
+                    onClick = { onProjection(NativeStitch.Projection.SPHERICAL) },
+                    enabled = enabled,
+                    label = { Text("Spherical") },
+                )
+                FilterChip(
+                    selected = projection == NativeStitch.Projection.CYLINDRICAL,
+                    onClick = { onProjection(NativeStitch.Projection.CYLINDRICAL) },
+                    enabled = enabled,
+                    label = { Text("Cylindrical") },
+                )
+                FilterChip(
+                    selected = projection == NativeStitch.Projection.PLANE,
+                    onClick = { onProjection(NativeStitch.Projection.PLANE) },
+                    enabled = enabled,
+                    label = { Text("Perspective") },
+                )
+            }
+            Text(
+                when (projection) {
+                    NativeStitch.Projection.SPHERICAL ->
+                        "All-round default — best for wide sweeps and multi-row panoramas."
+                    NativeStitch.Projection.CYLINDRICAL ->
+                        "Keeps verticals straight — good for a single horizontal sweep."
+                    NativeStitch.Projection.PLANE ->
+                        "Flat/perspective — good for a few frames of a flat subject."
+                },
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
     }
 }

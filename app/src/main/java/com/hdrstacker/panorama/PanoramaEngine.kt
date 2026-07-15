@@ -75,9 +75,11 @@ object PanoramaEngine {
     }
 
     /**
-     * Stitch [sources] (2+ overlapping images) into a single panorama saved to
-     * Pictures/Panoramas.
+     * Stitch [sources] (2+ overlapping images) into a single panorama and return
+     * it as a Bitmap. Saving is a separate step ([save]) so the caller can let
+     * the user crop first.
      *
+     * @param projection surface to warp onto (spherical / cylindrical / plane)
      * @param onProgress reports (fraction 0..1, human-readable stage label)
      * @throws PanoramaException on any recoverable failure (too few images, not
      *         enough overlap, undecodable input, etc.)
@@ -85,8 +87,9 @@ object PanoramaEngine {
     suspend fun stitch(
         context: Context,
         sources: List<Uri>,
+        projection: NativeStitch.Projection = NativeStitch.Projection.SPHERICAL,
         onProgress: (Float, String) -> Unit = { _, _ -> },
-    ): PanoramaResult = withContext(Dispatchers.Default) {
+    ): Bitmap = withContext(Dispatchers.Default) {
         if (sources.size < 2) {
             throw PanoramaException(
                 PanoramaError.NEED_MORE_IMAGES,
@@ -118,10 +121,14 @@ object PanoramaEngine {
 
             // ---- 2. Stitch (native OpenCV Stitcher; see NativeStitch) ----
             coroutineContext.ensureActive()
-            onProgress(sources.size / (sources.size + 2f), "Stitching panorama")
+            onProgress(sources.size / (sources.size + 1f), "Stitching panorama")
             val pano = Mat()
             val status = try {
-                NativeStitch.nativeStitch(images.map { it.nativeObj }.toLongArray(), pano.nativeObj)
+                NativeStitch.nativeStitch(
+                    images.map { it.nativeObj }.toLongArray(),
+                    projection.ordinal,
+                    pano.nativeObj,
+                )
             } catch (t: Throwable) {
                 pano.release()
                 if (t is kotlinx.coroutines.CancellationException) throw t
@@ -135,21 +142,24 @@ object PanoramaEngine {
                 throw statusToException(status)
             }
 
-            // ---- 3. Encode + save ----
-            onProgress((sources.size + 1) / (sources.size + 2f), "Saving")
+            // ---- 3. Encode to a Bitmap (saved later, after optional crop) ----
             val outBmp = Bitmap.createBitmap(pano.cols(), pano.rows(), Bitmap.Config.ARGB_8888)
             Utils.matToBitmap(pano, outBmp)
             pano.release()
-
-            val saved = saveToGallery(context, outBmp)
-            outBmp.recycle()
-            Log.i(TAG, "panorama saved: ${saved.displayName}")
             onProgress(1f, "Done")
-            saved
+            outBmp
         } finally {
             images.forEach { it.release() }
         }
     }
+
+    /** Save an (optionally cropped) panorama Bitmap to Pictures/Panoramas. */
+    suspend fun save(context: Context, bitmap: Bitmap): PanoramaResult =
+        withContext(Dispatchers.IO) {
+            val saved = saveToGallery(context, bitmap)
+            Log.i(TAG, "panorama saved: ${saved.displayName}")
+            saved
+        }
 
     private fun statusToException(status: Int): PanoramaException = when (status) {
         NativeStitch.ERR_NEED_MORE_IMGS -> PanoramaException(

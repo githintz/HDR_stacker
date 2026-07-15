@@ -15,6 +15,7 @@
 
 #include "opencv2/core.hpp"
 #include "opencv2/stitching.hpp"
+#include "opencv2/stitching/warpers.hpp"
 
 #define LOG_TAG "NativeStitch"
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
@@ -22,9 +23,27 @@
 // Extra status codes beyond cv::Stitcher::Status (which are 0..3).
 static constexpr jint STATUS_EXCEPTION = 100;
 
+// Projection (surface) the panorama is warped onto. Must match the ordinals of
+// NativeStitch.Projection on the Kotlin side.
+enum Projection {
+    PROJ_SPHERICAL = 0,
+    PROJ_CYLINDRICAL = 1,
+    PROJ_PLANE = 2,
+};
+
+static cv::Ptr<cv::WarperCreator> makeWarper(jint projection) {
+    switch (projection) {
+        case PROJ_CYLINDRICAL: return cv::makePtr<cv::CylindricalWarper>();
+        case PROJ_PLANE:       return cv::makePtr<cv::PlaneWarper>();
+        case PROJ_SPHERICAL:
+        default:               return cv::makePtr<cv::SphericalWarper>();
+    }
+}
+
 extern "C" JNIEXPORT jint JNICALL
 Java_com_hdrstacker_panorama_NativeStitch_nativeStitch(
-        JNIEnv *env, jobject /*thiz*/, jlongArray inputMatAddrs, jlong outputMatAddr) {
+        JNIEnv *env, jobject /*thiz*/, jlongArray inputMatAddrs, jint projection,
+        jlong outputMatAddr) {
     const jsize n = env->GetArrayLength(inputMatAddrs);
     if (n < 2) return static_cast<jint>(cv::Stitcher::ERR_NEED_MORE_IMGS);
 
@@ -42,6 +61,7 @@ Java_com_hdrstacker_panorama_NativeStitch_nativeStitch(
 
     try {
         cv::Ptr<cv::Stitcher> stitcher = cv::Stitcher::create(cv::Stitcher::PANORAMA);
+        stitcher->setWarper(makeWarper(projection));
         cv::Stitcher::Status status = stitcher->stitch(images, pano);
         return static_cast<jint>(status);
     } catch (const cv::Exception &e) {
