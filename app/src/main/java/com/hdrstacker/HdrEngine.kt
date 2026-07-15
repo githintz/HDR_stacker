@@ -107,13 +107,31 @@ object HdrEngine {
             }
 
             // ---- 2. Align hand-held brackets ----
-            // Align in place, matching OpenCV's own HDR tutorial. Passing a
-            // separate output list is unreliable: the Java binding does not
-            // populate a fresh list, leaving it empty and crashing the merge
-            // with "checkImageDimensions !images.empty()".
+            // Align each frame to the first using AlignMTB's per-frame Mat->Mat
+            // API (calculateShift + shiftMat). We deliberately avoid the
+            // process(List, List) overload: its vector-of-Mat marshalling is
+            // unreliable — the separate-list form comes back empty, and the
+            // in-place form returns the zero-shift reference frame as a
+            // use-after-free (a rainbow-striped frame 0). Doing it per frame
+            // keeps every buffer independently owned.
             coroutineContext.ensureActive()
             onProgress(sources.size / (sources.size + 2f), "Aligning frames")
-            Photo.createAlignMTB().process(mats, mats)
+            run {
+                val align = Photo.createAlignMTB()
+                val reference = mats[0]
+                val aligned = ArrayList<Mat>(mats.size)
+                aligned.add(reference.clone())              // reference: unshifted
+                for (i in 1 until mats.size) {
+                    coroutineContext.ensureActive()
+                    val shift = align.calculateShift(reference, mats[i])
+                    val shifted = Mat()
+                    align.shiftMat(mats[i], shifted, shift)
+                    aligned.add(shifted)
+                }
+                mats.forEach { it.release() }
+                mats.clear()
+                mats.addAll(aligned)
+            }
 
             if (diagnostic) {
                 mats.forEachIndexed { i, m -> dumpMat(context, m, "HDRDIAG_2aligned_$i") }
