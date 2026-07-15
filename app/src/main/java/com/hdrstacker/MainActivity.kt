@@ -61,6 +61,7 @@ class MainActivity : ComponentActivity() {
                     onClear = vm::clearFrames,
                     onMode = vm::setMode,
                     onHalfRes = vm::setHalfResolution,
+                    onDiagnostic = vm::setDiagnostic,
                     onStack = vm::stack,
                     onCancel = vm::cancel,
                     onOpenResult = ::openInGallery,
@@ -105,6 +106,7 @@ private fun HdrScreen(
     onClear: () -> Unit,
     onMode: (FusionMode) -> Unit,
     onHalfRes: (Boolean) -> Unit,
+    onDiagnostic: (Boolean) -> Unit,
     onStack: () -> Unit,
     onCancel: () -> Unit,
     onOpenResult: (StackResult) -> Unit,
@@ -138,7 +140,7 @@ private fun HdrScreen(
                 }
             }
 
-            OptionsCard(state, onMode, onHalfRes)
+            OptionsCard(state, onMode, onHalfRes, onDiagnostic)
 
             // Frame list
             LazyColumn(
@@ -212,6 +214,7 @@ private fun OptionsCard(
     state: UiState,
     onMode: (FusionMode) -> Unit,
     onHalfRes: (Boolean) -> Unit,
+    onDiagnostic: (Boolean) -> Unit,
 ) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -250,6 +253,21 @@ private fun OptionsCard(
                     )
                 }
                 Switch(checked = state.halfResolution, onCheckedChange = onHalfRes)
+            }
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Diagnostic mode", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "Also saves each decoded and aligned frame to the gallery " +
+                            "so you can see where an artifact starts.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Switch(checked = state.diagnostic, onCheckedChange = onDiagnostic)
             }
         }
     }

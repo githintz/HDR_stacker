@@ -18,6 +18,7 @@ data class UiState(
     val frames: List<Frame> = emptyList(),
     val mode: FusionMode = FusionMode.EXPOSURE_FUSION,
     val halfResolution: Boolean = false,
+    val diagnostic: Boolean = false,
     val running: Boolean = false,
     val progress: Float = 0f,
     val stage: String = "",
@@ -61,6 +62,8 @@ class HdrViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setHalfResolution(half: Boolean) = _state.update { it.copy(halfResolution = half) }
 
+    fun setDiagnostic(on: Boolean) = _state.update { it.copy(diagnostic = on) }
+
     fun cancel() {
         job?.cancel()
         job = null
@@ -78,6 +81,7 @@ class HdrViewModel(app: Application) : AndroidViewModel(app) {
                     sources = s.frames.map { it.uri },
                     mode = s.mode,
                     halfResolution = s.halfResolution,
+                    diagnostic = s.diagnostic,
                     onProgress = { p, stage ->
                         _state.update { it.copy(progress = p, stage = stage) }
                     },

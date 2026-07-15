@@ -65,6 +65,7 @@ object HdrEngine {
         sources: List<Uri>,
         mode: FusionMode = FusionMode.EXPOSURE_FUSION,
         halfResolution: Boolean = false,
+        diagnostic: Boolean = false,
         onProgress: (Float, String) -> Unit = { _, _ -> },
     ): StackResult = withContext(Dispatchers.Default) {
         require(sources.size >= 2) { "Need at least two bracketed frames" }
@@ -95,6 +96,10 @@ object HdrEngine {
                 Imgproc.cvtColor(rgba, rgb, Imgproc.COLOR_RGBA2RGB)
                 rgba.release()
                 mats.add(rgb)
+
+                if (diagnostic) {
+                    dumpMat(context, rgb, "HDRDIAG_1decoded_$index")
+                }
             }
 
             require(mats.allSameSize()) {
@@ -109,6 +114,10 @@ object HdrEngine {
             coroutineContext.ensureActive()
             onProgress(sources.size / (sources.size + 2f), "Aligning frames")
             Photo.createAlignMTB().process(mats, mats)
+
+            if (diagnostic) {
+                mats.forEachIndexed { i, m -> dumpMat(context, m, "HDRDIAG_2aligned_$i") }
+            }
 
             // ---- 3. Fuse ----
             coroutineContext.ensureActive()
@@ -188,8 +197,21 @@ object HdrEngine {
         return all { it.size() == s }
     }
 
-    private fun saveToGallery(context: Context, bitmap: Bitmap): StackResult {
-        val name = "HDR_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date()) + ".jpg"
+    /**
+     * Save a single Mat straight to the gallery for diagnostics, so the user
+     * can eyeball where an artifact first appears without needing logcat.
+     */
+    private fun dumpMat(context: Context, mat: Mat, label: String) {
+        val bmp = Bitmap.createBitmap(mat.cols(), mat.rows(), Bitmap.Config.ARGB_8888)
+        Utils.matToBitmap(mat, bmp)
+        runCatching { saveToGallery(context, bmp, label) }
+            .onFailure { Log.e(TAG, "diagnostic dump failed for $label", it) }
+        bmp.recycle()
+    }
+
+    private fun saveToGallery(context: Context, bitmap: Bitmap, baseName: String? = null): StackResult {
+        val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        val name = (baseName ?: "HDR") + "_" + stamp + ".jpg"
         val resolver = context.contentResolver
         val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
