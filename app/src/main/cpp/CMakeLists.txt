@@ -25,8 +25,14 @@ include(FetchContent)
 
 FetchContent_Declare(
         libraw
+        # 0.21.5 fixes several decoder heap overflows / out-of-buffer reads
+        # (CVE-2025-43961..43964 and oss-fuzz fixes) over 0.21.4. Diagnostics
+        # traced the HDR artifact to native-heap corruption during RAW decode
+        # (decoded frames are clean but a *neighbouring* frame buffer gets
+        # clobbered — the classic signature of a decoder overrun), so pull in
+        # the patched decoder.
         GIT_REPOSITORY "https://github.com/LibRaw/LibRaw.git"
-        GIT_TAG "0.21.4"
+        GIT_TAG "0.21.5"
         GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(libraw)

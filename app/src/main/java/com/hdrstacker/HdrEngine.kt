@@ -74,7 +74,16 @@ object HdrEngine {
         val mats = ArrayList<Mat>(sources.size)
         val shutters = FloatArray(sources.size)
         try {
-            // ---- 1. Decode each NEF and convert to an OpenCV RGB Mat ----
+            // ---- 1a. Decode every NEF FIRST, holding only JVM int[] buffers.
+            // No OpenCV Mats are allocated during this phase. Diagnostics showed
+            // the decoded frames come out clean, yet a *different* frame's pixel
+            // buffer ends up corrupted (a moving victim) — the signature of a
+            // heap overrun inside the native RAW decoder clobbering a
+            // neighbouring native allocation. By deferring all Mat allocation
+            // until after every decode finishes, there is no adjacent frame Mat
+            // for a decoder overrun to corrupt (the int[] results live on the
+            // managed JVM heap, separate from the native malloc heap).
+            val decodedFrames = arrayOfNulls<DecodedImage>(sources.size)
             sources.forEachIndexed { index, uri ->
                 coroutineContext.ensureActive()
                 onProgress(index / (sources.size + 2f), "Decoding frame ${index + 1}/${sources.size}")
@@ -82,13 +91,18 @@ object HdrEngine {
                 val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                     ?: error("Cannot open $uri")
 
-                val decoded = NativeHdr.decodeNef(bytes, halfResolution)
+                val d = NativeHdr.decodeNef(bytes, halfResolution)
                     ?: error("Not a decodable RAW: $uri")
-                shutters[index] = decoded.shutter
+                decodedFrames[index] = d
+                shutters[index] = d.shutter
+            }
 
-                val bmp = Bitmap.createBitmap(
-                    decoded.pixels, decoded.width, decoded.height, Bitmap.Config.ARGB_8888,
-                )
+            // ---- 1b. Convert the decoded buffers to Mats (no RAW decoding here) ----
+            for (index in decodedFrames.indices) {
+                coroutineContext.ensureActive()
+                val d = decodedFrames[index]!!
+                val bmp = Bitmap.createBitmap(d.pixels, d.width, d.height, Bitmap.Config.ARGB_8888)
+                decodedFrames[index] = null       // drop the int[] as soon as it's copied
                 val rgba = Mat()
                 Utils.bitmapToMat(bmp, rgba)      // CV_8UC4, RGBA
                 bmp.recycle()
