@@ -10,18 +10,19 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.HdrStacker">
 
+        <!-- Single-activity UI shell: Library / Edit / Cloud tabs. -->
         <activity
-            android:name=".HomeActivity"
+            android:name=".studio.StudioActivity"
             android:exported="true"
             android:label="@string/app_name"
-            android:theme="@style/Theme.HdrStacker">
+            android:theme="@style/Theme.PhotoStudio">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
 
-        <!-- HDR feature (unchanged); now launched from HomeActivity. -->
+        <!-- HDR feature (unchanged); launched from the library's selection bar. -->
         <activity
             android:name=".MainActivity"
             android:exported="false"

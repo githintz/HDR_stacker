@@ -9,4 +9,15 @@
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>
+
+    <!--
+      Launch theme for the studio shell, which is always dark regardless of the
+      system setting; keeps the pre-Compose launch window from flashing white.
+      Defined only in values/ so it applies in both day and night modes.
+    -->
+    <style name="Theme.PhotoStudio" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowBackground">#FF0F1215</item>
+    </style>
 </resources>
