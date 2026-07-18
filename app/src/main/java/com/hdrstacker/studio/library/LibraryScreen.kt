@@ -1,6 +1,8 @@
 package com.hdrstacker.studio.library
 
+import android.graphics.Bitmap
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -29,17 +31,17 @@ import androidx.compose.material.icons.filled.CenterFocusStrong
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Landscape
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Panorama
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.outlined.BlurOn
+import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.CloudQueue
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material3.Button
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -53,22 +55,24 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hdrstacker.studio.PhotoItem
-import com.hdrstacker.studio.PhotoPalette
 import com.hdrstacker.studio.PhotoSource
 import com.hdrstacker.studio.QualityFlag
+import com.hdrstacker.studio.Thumbnails
+
+private const val GRID_THUMB_PX = 256
 
 /** Library top bar; switches to a contextual bar while photos are selected. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -77,8 +81,7 @@ fun LibraryTopBar(
     state: LibraryUiState,
     onSelectAll: () -> Unit,
     onClearSelection: () -> Unit,
-    onLoadSamples: () -> Unit,
-    onClearLibrary: () -> Unit,
+    onRefresh: () -> Unit,
 ) {
     if (state.selectionMode) {
         TopAppBar(
@@ -98,22 +101,11 @@ fun LibraryTopBar(
             ),
         )
     } else {
-        var menuOpen by remember { mutableStateOf(false) }
         TopAppBar(
             title = { Text("Library") },
             actions = {
-                IconButton(onClick = { menuOpen = true }) {
-                    Icon(Icons.Default.MoreVert, contentDescription = "More options")
-                }
-                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    DropdownMenuItem(
-                        text = { Text("Load sample photos") },
-                        onClick = { menuOpen = false; onLoadSamples() },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Clear library") },
-                        onClick = { menuOpen = false; onClearLibrary() },
-                    )
+                IconButton(onClick = onRefresh, enabled = state.hasPermission && !state.scanning) {
+                    Icon(Icons.Default.Refresh, contentDescription = "Rescan library")
                 }
             },
         )
@@ -125,7 +117,7 @@ fun LibraryTopBar(
 fun LibraryScreen(
     state: LibraryUiState,
     onFilter: (SourceFilter) -> Unit,
-    onLoadSamples: () -> Unit,
+    onRequestAccess: () -> Unit,
     onPhotoClick: (PhotoItem) -> Unit,
     onPhotoLongClick: (PhotoItem) -> Unit,
     modifier: Modifier = Modifier,
@@ -149,14 +141,22 @@ fun LibraryScreen(
         }
 
         val photos = state.visiblePhotos
-        if (photos.isEmpty()) {
-            EmptyLibrary(
-                filteredOut = state.photos.isNotEmpty(),
-                onLoadSamples = onLoadSamples,
+        when {
+            !state.hasPermission -> PermissionEmptyState(
+                onRequestAccess = onRequestAccess,
                 modifier = Modifier.weight(1f),
             )
-        } else {
-            LazyVerticalGrid(
+            state.scanning && !state.scanned -> Box(
+                Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                contentAlignment = Alignment.Center,
+            ) { CircularProgressIndicator() }
+            photos.isEmpty() -> EmptyLibrary(
+                filter = state.filter,
+                modifier = Modifier.weight(1f),
+            )
+            else -> LazyVerticalGrid(
                 columns = GridCells.Adaptive(minSize = 104.dp),
                 modifier = Modifier.weight(1f),
                 horizontalArrangement = Arrangement.spacedBy(3.dp),
@@ -187,11 +187,15 @@ private fun PhotoTile(
     onLongClick: () -> Unit,
 ) {
     val shape = RoundedCornerShape(6.dp)
+    val context = LocalContext.current
+    val thumbnail by produceState<Bitmap?>(initialValue = null, photo.uri) {
+        value = Thumbnails.load(context, photo.uri, GRID_THUMB_PX)
+    }
     Box(
         Modifier
             .aspectRatio(1f)
             .clip(shape)
-            .background(Brush.linearGradient(PhotoPalette.colors(photo.paletteIndex)))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
             .then(
                 if (selected) {
                     Modifier.border(2.dp, MaterialTheme.colorScheme.primary, shape)
@@ -201,6 +205,14 @@ private fun PhotoTile(
             )
             .combinedClickable(onClick = onClick, onLongClick = onLongClick),
     ) {
+        thumbnail?.let {
+            Image(
+                bitmap = it.asImageBitmap(),
+                contentDescription = photo.name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.matchParentSize(),
+            )
+        }
         if (selected) {
             Box(
                 Modifier
@@ -280,9 +292,8 @@ private fun TileBadge(
 }
 
 @Composable
-private fun EmptyLibrary(
-    filteredOut: Boolean,
-    onLoadSamples: () -> Unit,
+private fun PermissionEmptyState(
+    onRequestAccess: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -299,34 +310,65 @@ private fun EmptyLibrary(
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(16.dp))
+        Text("Let Photo Studio see your photos", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(8.dp))
         Text(
-            if (filteredOut) "No photos match this filter" else "Your library is empty",
+            "Your library is built from the photos on this device, sorted by " +
+                "capture date. Everything stays stored locally — nothing is " +
+                "uploaded unless you connect a cloud provider.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(16.dp))
+        Button(onClick = onRequestAccess) { Text("Allow photo access") }
+    }
+}
+
+@Composable
+private fun EmptyLibrary(
+    filter: SourceFilter,
+    modifier: Modifier = Modifier,
+) {
+    val cloud = filter == SourceFilter.CLOUD
+    Column(
+        modifier
+            .fillMaxWidth()
+            .padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Icon(
+            if (cloud) Icons.Outlined.CloudOff else Icons.Outlined.PhotoLibrary,
+            contentDescription = null,
+            modifier = Modifier.size(72.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(16.dp))
+        Text(
+            if (cloud) "No cloud photos" else "No photos found",
             style = MaterialTheme.typography.titleMedium,
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            if (filteredOut) {
-                "Switch the filter above to see the rest of your library."
+            if (cloud) {
+                "Connect a provider in the Cloud tab to browse cloud photos " +
+                    "here. Until then, everything is stored locally on this device."
             } else {
-                "Photos on this device and from your connected cloud storage will " +
-                    "appear here once scanning is wired in. Load sample photos to " +
-                    "explore the interface."
+                "Photos you take or import on this device will appear here, " +
+                    "newest first."
             },
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
-        if (!filteredOut) {
-            Spacer(Modifier.height(16.dp))
-            Button(onClick = onLoadSamples) { Text("Load sample photos") }
-        }
     }
 }
 
 /**
  * Replaces the bottom navigation bar while a selection is active. HDR and
- * panorama launch the real feature activities; focus stacking is a stub until
- * that stage lands.
+ * panorama launch the real feature activities with the selected photos; focus
+ * stacking is a stub until that stage lands.
  */
 @Composable
 fun SelectionActionBar(

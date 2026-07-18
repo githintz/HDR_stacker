@@ -53,6 +53,14 @@ class PanoramaActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Photos handed over from the library's multi-select; the ViewModel
+        // survives config changes, so only seed it on first creation.
+        if (savedInstanceState == null) {
+            androidx.core.content.IntentCompat
+                .getParcelableArrayListExtra(intent, EXTRA_SOURCE_URIS, Uri::class.java)
+                ?.takeIf { it.isNotEmpty() }
+                ?.let { vm.addFrames(it) }
+        }
         enableEdgeToEdge()
         setContent {
             HdrStackerTheme {
@@ -92,6 +100,11 @@ class PanoramaActivity : ComponentActivity() {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         runCatching { startActivity(intent) }
+    }
+
+    companion object {
+        /** ArrayList<Uri> extra with photos pre-selected in the library grid. */
+        const val EXTRA_SOURCE_URIS = "com.hdrstacker.panorama.SOURCE_URIS"
     }
 }
 

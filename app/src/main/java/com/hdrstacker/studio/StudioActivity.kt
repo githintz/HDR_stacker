@@ -1,11 +1,16 @@
 package com.hdrstacker.studio
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
@@ -29,6 +34,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hdrstacker.MainActivity
 import com.hdrstacker.panorama.PanoramaActivity
@@ -56,6 +62,11 @@ class StudioActivity : ComponentActivity() {
     private val editVm: EditViewModel by viewModels()
     private val cloudVm: CloudViewModel by viewModels()
 
+    private val requestPhotoAccess =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+            libraryVm.onPermissionResult(hasPhotoPermission())
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -65,13 +76,56 @@ class StudioActivity : ComponentActivity() {
                     libraryVm = libraryVm,
                     editVm = editVm,
                     cloudVm = cloudVm,
-                    onLaunchHdr = { startActivity(Intent(this, MainActivity::class.java)) },
-                    onLaunchPanorama = {
-                        startActivity(Intent(this, PanoramaActivity::class.java))
+                    onRequestPhotoAccess = { requestPhotoAccess.launch(photoPermissions()) },
+                    onLaunchHdr = { uris ->
+                        launchTool(MainActivity::class.java, MainActivity.EXTRA_SOURCE_URIS, uris)
+                    },
+                    onLaunchPanorama = { uris ->
+                        launchTool(
+                            PanoramaActivity::class.java,
+                            PanoramaActivity.EXTRA_SOURCE_URIS,
+                            uris,
+                        )
                     },
                 )
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Rescan on every return to the shell so results just saved by the HDR
+        // or panorama tools show up in the grid immediately.
+        libraryVm.onPermissionResult(hasPhotoPermission())
+    }
+
+    private fun launchTool(activity: Class<*>, extraName: String, uris: List<Uri>) {
+        startActivity(
+            Intent(this, activity).putParcelableArrayListExtra(extraName, ArrayList(uris)),
+        )
+    }
+
+    private fun hasPhotoPermission(): Boolean {
+        fun granted(permission: String) =
+            ContextCompat.checkSelfPermission(this, permission) ==
+                PackageManager.PERMISSION_GRANTED
+        return when {
+            // API 34+: full access, or the user granted a photo subset.
+            Build.VERSION.SDK_INT >= 34 ->
+                granted(Manifest.permission.READ_MEDIA_IMAGES) ||
+                    granted(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+            Build.VERSION.SDK_INT == 33 -> granted(Manifest.permission.READ_MEDIA_IMAGES)
+            else -> granted(Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
+    }
+
+    private fun photoPermissions(): Array<String> = when {
+        Build.VERSION.SDK_INT >= 34 -> arrayOf(
+            Manifest.permission.READ_MEDIA_IMAGES,
+            Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED,
+        )
+        Build.VERSION.SDK_INT == 33 -> arrayOf(Manifest.permission.READ_MEDIA_IMAGES)
+        else -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
     }
 }
 
@@ -86,8 +140,9 @@ private fun StudioShell(
     libraryVm: LibraryViewModel,
     editVm: EditViewModel,
     cloudVm: CloudViewModel,
-    onLaunchHdr: () -> Unit,
-    onLaunchPanorama: () -> Unit,
+    onRequestPhotoAccess: () -> Unit,
+    onLaunchHdr: (List<Uri>) -> Unit,
+    onLaunchPanorama: (List<Uri>) -> Unit,
 ) {
     val libraryState by libraryVm.state.collectAsStateWithLifecycle()
     val editState by editVm.state.collectAsStateWithLifecycle()
@@ -117,8 +172,7 @@ private fun StudioShell(
                     state = libraryState,
                     onSelectAll = libraryVm::selectAllVisible,
                     onClearSelection = libraryVm::clearSelection,
-                    onLoadSamples = libraryVm::loadSamplePhotos,
-                    onClearLibrary = libraryVm::clearLibrary,
+                    onRefresh = libraryVm::refresh,
                 )
                 StudioTab.EDIT -> EditTopBar(
                     state = editState,
@@ -133,12 +187,14 @@ private fun StudioShell(
                 SelectionActionBar(
                     selectedCount = libraryState.selectedCount,
                     onMergeHdr = {
+                        val uris = libraryState.selectedPhotos.map { it.uri }
                         libraryVm.clearSelection()
-                        onLaunchHdr()
+                        onLaunchHdr(uris)
                     },
                     onPanorama = {
+                        val uris = libraryState.selectedPhotos.map { it.uri }
                         libraryVm.clearSelection()
-                        onLaunchPanorama()
+                        onLaunchPanorama(uris)
                     },
                     onFocusStack = {
                         showStub(
@@ -167,7 +223,7 @@ private fun StudioShell(
                 StudioTab.LIBRARY -> LibraryScreen(
                     state = libraryState,
                     onFilter = libraryVm::setFilter,
-                    onLoadSamples = libraryVm::loadSamplePhotos,
+                    onRequestAccess = onRequestPhotoAccess,
                     onPhotoClick = { photo ->
                         if (libraryState.selectionMode) {
                             libraryVm.toggleSelection(photo.id)

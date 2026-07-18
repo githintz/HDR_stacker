@@ -1,12 +1,13 @@
 package com.hdrstacker.studio.edit
 
+import android.graphics.Bitmap
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -25,6 +26,7 @@ import androidx.compose.material.icons.outlined.IosShare
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -38,19 +40,23 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hdrstacker.studio.PhotoItem
-import com.hdrstacker.studio.PhotoPalette
+import com.hdrstacker.studio.Thumbnails
 import java.util.Locale
+
+private const val PREVIEW_PX = 1280
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -139,19 +145,29 @@ fun EditScreen(
 
 @Composable
 private fun PreviewArea(photo: PhotoItem, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val preview by produceState<Bitmap?>(initialValue = null, photo.uri) {
+        value = Thumbnails.load(context, photo.uri, PREVIEW_PX)
+    }
     Box(
         modifier.background(Color.Black),
         contentAlignment = Alignment.Center,
     ) {
-        Box(
-            Modifier
-                .fillMaxWidth(0.92f)
-                .aspectRatio(3f / 2f)
-                .clip(RoundedCornerShape(4.dp))
-                .background(Brush.linearGradient(PhotoPalette.colors(photo.paletteIndex))),
-        )
+        val bitmap = preview
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = photo.name,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(8.dp),
+            )
+        } else {
+            CircularProgressIndicator()
+        }
         Text(
-            "Placeholder preview — live rendering arrives with the edit engine",
+            "Adjustments don't render yet — live preview arrives with the edit engine",
             style = MaterialTheme.typography.labelSmall,
             color = Color.White.copy(alpha = 0.85f),
             modifier = Modifier

@@ -50,6 +50,14 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Photos handed over from the library's multi-select; the ViewModel
+        // survives config changes, so only seed it on first creation.
+        if (savedInstanceState == null) {
+            androidx.core.content.IntentCompat
+                .getParcelableArrayListExtra(intent, EXTRA_SOURCE_URIS, android.net.Uri::class.java)
+                ?.takeIf { it.isNotEmpty() }
+                ?.let { vm.addFrames(it) }
+        }
         enableEdgeToEdge()
         setContent {
             HdrStackerTheme {
@@ -84,6 +92,9 @@ class MainActivity : ComponentActivity() {
     }
 
     companion object {
+        /** ArrayList<Uri> extra with photos pre-selected in the library grid. */
+        const val EXTRA_SOURCE_URIS = "com.hdrstacker.SOURCE_URIS"
+
         // NEF is often reported as image/x-nikon-nef or the generic image/*; some
         // providers only expose octet-stream, so we cast a wide net and let LibRaw
         // reject anything that isn't actually a RAW.
