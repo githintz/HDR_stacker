@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Distinct launcher label so the ASan build is distinguishable from the
+         normal install it sits alongside. -->
+    <string name="app_name">Photo Studio (ASan)</string>
+</resources>

@@ -4,6 +4,39 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// ---------------------------------------------------------------------------
+// AddressSanitizer support for the `asan` build type (see buildTypes below).
+// The NDK ships the ASan runtime as a shared library that must travel inside
+// the APK so wrap.sh can LD_PRELOAD it; this task stages it into a jniLibs
+// directory keyed by ABI.
+// ---------------------------------------------------------------------------
+val asanRuntimeDir = layout.buildDirectory.dir("asanRuntime")
+
+val packageAsanRuntime = tasks.register<Copy>("packageAsanRuntime") {
+    description = "Stages the NDK's ASan runtime libraries for the asan variant"
+    from(provider {
+        fileTree("${android.ndkDirectory}/toolchains/llvm/prebuilt") {
+            include("**/libclang_rt.asan-*-android.so")
+        }
+    })
+    into(asanRuntimeDir)
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    includeEmptyDirs = false
+    eachFile {
+        val abi = when {
+            name.contains("aarch64") -> "arm64-v8a"
+            name.contains("-arm-") -> "armeabi-v7a"
+            name.contains("x86_64") -> "x86_64"
+            else -> null
+        }
+        if (abi == null) exclude() else path = "$abi/$name"
+    }
+}
+
+tasks.configureEach {
+    if (name == "mergeAsanJniLibFolders") dependsOn(packageAsanRuntime)
+}
+
 android {
     namespace = "com.hdrstacker"
     compileSdk = 35
@@ -40,6 +73,27 @@ android {
                 "proguard-rules.pro"
             )
         }
+        // Debugging variant with LibRaw + the JNI bridge built under
+        // AddressSanitizer, installable alongside the normal app. Used to
+        // pinpoint the NEF-decode heap overrun on-device with the real files.
+        // The panorama module is not built in this variant.
+        create("asan") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".asan"
+            versionNameSuffix = "-asan"
+            signingConfig = signingConfigs.getByName("debug")
+            externalNativeBuild {
+                cmake {
+                    arguments += "-DENABLE_ASAN=ON"
+                }
+            }
+        }
+    }
+
+    sourceSets {
+        getByName("asan") {
+            jniLibs.srcDir(asanRuntimeDir)
+        }
     }
 
     externalNativeBuild {
@@ -65,6 +119,11 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+        jniLibs {
+            // Extract native libs to disk on install. Required for wrap.sh
+            // (the asan variant's ASan preloader) to be found and executed.
+            useLegacyPackaging = true
         }
     }
 }

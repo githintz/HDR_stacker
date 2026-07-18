@@ -40,12 +40,28 @@ jobs:
           restore-keys: |
             gradle-${{ runner.os }}-
 
-      - name: Build debug APK
-        run: ./gradlew assembleDebug --stacktrace --no-configuration-cache
+      - name: Build debug and ASan APKs
+        run: ./gradlew assembleDebug assembleAsan --stacktrace --no-configuration-cache
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: hdr-stacker-debug
           path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: Upload ASan APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: hdr-stacker-asan
+          path: app/build/outputs/apk/asan/*.apk
+          if-no-files-found: error
+
+      # Unstripped decoder library from the asan variant, used to symbolize
+      # the raw addresses in on-device ASan reports offline.
+      - name: Upload ASan symbols
+        uses: actions/upload-artifact@v4
+        with:
+          name: hdr-stacker-asan-symbols
+          path: app/build/intermediates/merged_native_libs/asan/**/libhdrstacker.so
           if-no-files-found: error

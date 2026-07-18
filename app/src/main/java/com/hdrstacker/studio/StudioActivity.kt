@@ -13,18 +13,28 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -34,6 +44,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hdrstacker.MainActivity
@@ -88,8 +102,41 @@ class StudioActivity : ComponentActivity() {
                         )
                     },
                 )
+
+                // AddressSanitizer report catcher (asan build type). If the
+                // native decoder tripped ASan on the previous run, the report
+                // was written to filesDir by wrap.sh's log_path; surface it so
+                // it can be copied out without adb. No-op in normal builds.
+                var asanReport by remember { mutableStateOf(readAsanReports()) }
+                asanReport?.let { report ->
+                    AsanReportDialog(
+                        report = report,
+                        onDismiss = { asanReport = null },
+                        onDelete = {
+                            deleteAsanReports()
+                            asanReport = null
+                        },
+                    )
+                }
             }
         }
+    }
+
+    private fun readAsanReports(): String? {
+        val files = filesDir.listFiles { f -> f.isFile && f.name.startsWith("asan_report") }
+            ?.sortedByDescending { it.lastModified() }
+            .orEmpty()
+        if (files.isEmpty()) return null
+        val text = files.joinToString("\n\n========\n\n") { f ->
+            "== ${f.name} ==\n" + runCatching { f.readText() }.getOrElse { "(unreadable: $it)" }
+        }
+        // Keep the dialog and clipboard payload bounded; reports are ~10-100 KB.
+        return text.take(400_000)
+    }
+
+    private fun deleteAsanReports() {
+        filesDir.listFiles { f -> f.isFile && f.name.startsWith("asan_report") }
+            ?.forEach { it.delete() }
     }
 
     override fun onResume() {
@@ -268,4 +315,50 @@ private fun StudioShell(
             },
         )
     }
+}
+
+/**
+ * Shows a captured AddressSanitizer report with a copy-to-clipboard action, so
+ * the crash details can be shared for analysis without needing adb access.
+ */
+@Composable
+private fun AsanReportDialog(
+    report: String,
+    onDismiss: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val clipboard = LocalClipboardManager.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Native crash report captured") },
+        text = {
+            Column {
+                Text(
+                    "AddressSanitizer caught a native memory error during the " +
+                        "last run. Copy the report and share it for analysis.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    report,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier
+                        .heightIn(max = 280.dp)
+                        .verticalScroll(rememberScrollState()),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { clipboard.setText(AnnotatedString(report)) }) {
+                Text("Copy report")
+            }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onDelete) { Text("Delete") }
+                TextButton(onClick = onDismiss) { Text("Close") }
+            }
+        },
+    )
 }

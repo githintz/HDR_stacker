@@ -4,6 +4,14 @@ project(hdrstacker LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# The `asan` Gradle build type passes -DENABLE_ASAN=ON. It instruments the RAW
+# decode path (LibRaw + the JNI bridge) with AddressSanitizer to catch the
+# heap overrun that corrupts a neighbouring frame during NEF decode. The
+# panorama module is skipped in that variant: it halves the build and keeps
+# the instrumented process focused on the decode path under test.
+option(ENABLE_ASAN
+        "Instrument LibRaw and the JNI bridge with AddressSanitizer" OFF)
+
 # ---------------------------------------------------------------------------
 # LibRaw — decodes Nikon NEF (and every other supported RAW) into RGB.
 #
@@ -56,6 +64,16 @@ target_link_libraries(hdrstacker
         raw
         ${log-lib})
 
+if(ENABLE_ASAN)
+    # -O1 + frame pointers keep ASan stack traces accurate without making the
+    # decode unusably slow. The dynamic ASan runtime is packaged into the APK
+    # by Gradle and preloaded by wrap.sh.
+    set(ASAN_FLAGS -fsanitize=address -fno-omit-frame-pointer -O1)
+    target_compile_options(raw PRIVATE ${ASAN_FLAGS})
+    target_compile_options(hdrstacker PRIVATE ${ASAN_FLAGS})
+    target_link_options(hdrstacker PRIVATE -fsanitize=address)
+endif()
+
 # ---------------------------------------------------------------------------
 # Panorama stitching (Stage 1).
 #
@@ -69,6 +87,10 @@ target_link_libraries(hdrstacker
 # `find_package(OpenCV)` here resolves to the prefab-generated config (enabled
 # by android.buildFeatures.prefab); the imported target is OpenCV::opencv_java4.
 # ---------------------------------------------------------------------------
+# Not built in the ASan variant (see the option at the top of this file); the
+# panorama screen is absent from that debugging build.
+if(NOT ENABLE_ASAN)
+
 find_package(OpenCV REQUIRED CONFIG)
 
 # Git clone (shallow) rather than the archive tarball: the tarball download
@@ -109,3 +131,5 @@ target_compile_options(panostitcher PRIVATE -w)
 target_link_libraries(panostitcher
         OpenCV::opencv_java4
         ${log-lib})
+
+endif() # NOT ENABLE_ASAN
