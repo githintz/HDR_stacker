@@ -173,7 +173,26 @@ class StudioActivity : ComponentActivity() {
         runCatching {
             crash.traceInputStream?.use { stream ->
                 val bytes = stream.readBytes()
-                sb.append(extractPrintable(bytes, maxOut = 80_000))
+                val full = extractPrintable(bytes, maxOut = 1_500_000)
+                // Tombstones list every thread; the interesting frames are the
+                // ones inside our decoder. Centre the excerpt on the first
+                // mention of the decoder LIBRARY (plain "hdrstacker" also
+                // occurs in apk paths on idle threads) so it survives
+                // clipboard and message length limits; fall back to the
+                // fault-address marker, then the head.
+                val idx = full.indexOf("libhdrstacker")
+                    .takeIf { it >= 0 }
+                    ?: full.indexOf("SEGV")
+                sb.append(
+                    if (idx >= 0) {
+                        full.substring(
+                            (idx - 6_000).coerceAtLeast(0),
+                            (idx + 30_000).coerceAtMost(full.length),
+                        )
+                    } else {
+                        full.take(60_000)
+                    },
+                )
             }
         }
         return sb.toString()

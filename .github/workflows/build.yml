@@ -43,24 +43,24 @@ jobs:
       - name: Build debug and ASan APKs
         run: ./gradlew assembleDebug assembleAsan --stacktrace --no-configuration-cache
 
-      # Prove the ASan variant is correctly assembled: the runtime must be in
-      # the APK under the exact name libhdrstacker.so declares as DT_NEEDED.
-      - name: Inspect ASan packaging
+      # Prove the debugging variant is correctly assembled: libhdrstacker.so
+      # must contain the guard-page allocator (wrapped malloc) and depend on
+      # no sanitizer runtime.
+      - name: Inspect debug-variant packaging
         run: |
           APK=$(ls app/build/outputs/apk/asan/*.apk)
           echo "== Native libs inside $APK =="
           unzip -l "$APK" | grep 'lib/' || true
           NDK="$ANDROID_HOME/ndk/27.0.12077973"
           READELF=$(find "$NDK/toolchains" -name llvm-readelf | head -1)
+          NM=$(find "$NDK/toolchains" -name llvm-nm | head -1)
           SO=$(find app/build/intermediates/merged_native_libs/asan -name libhdrstacker.so | head -1)
           echo "== DT_NEEDED of $SO =="
           "$READELF" -d "$SO" | grep NEEDED || true
-          echo "== ASan runtimes shipped in this NDK =="
-          find "$NDK/toolchains" -name 'libclang_rt.asan*' || true
-          echo "== Staged runtimes =="
-          find app/build/asanRuntime -type f || true
-          if ! unzip -l "$APK" | grep -q 'lib/arm64-v8a/libclang_rt.asan'; then
-            echo 'ERROR: ASan runtime missing from the APK'
+          echo "== Guard allocator symbols =="
+          "$NM" -D "$SO" | grep -i wrap_malloc || true
+          if ! "$NM" -D "$SO" | grep -qi wrap_malloc; then
+            echo 'ERROR: guard-page allocator not linked into libhdrstacker.so'
             exit 1
           fi
 

@@ -4,13 +4,16 @@ project(hdrstacker LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# The `asan` Gradle build type passes -DENABLE_ASAN=ON. It instruments the RAW
-# decode path (LibRaw + the JNI bridge) with AddressSanitizer to catch the
-# heap overrun that corrupts a neighbouring frame during NEF decode. The
-# panorama module is skipped in that variant: it halves the build and keeps
-# the instrumented process focused on the decode path under test.
+# The `asan` Gradle build type passes -DENABLE_ASAN=ON (historical name).
+# It links a guard-page debugging heap into the RAW decode path: every
+# LibRaw allocation ends flush against a PROT_NONE page, so the heap overrun
+# that corrupts a neighbouring frame during NEF decode faults instantly at
+# the guilty instruction with a clean tombstone. (Dynamic AddressSanitizer
+# proved unusable on modern OEM Android builds — it dies in its own init.)
+# The panorama module is skipped in that variant: it halves the build and
+# keeps the debugging APK focused on the decode path under test.
 option(ENABLE_ASAN
-        "Instrument LibRaw and the JNI bridge with AddressSanitizer" OFF)
+        "Link the guard-page debugging heap into LibRaw and the JNI bridge" OFF)
 
 # ---------------------------------------------------------------------------
 # LibRaw — decodes Nikon NEF (and every other supported RAW) into RGB.
@@ -65,13 +68,18 @@ target_link_libraries(hdrstacker
         ${log-lib})
 
 if(ENABLE_ASAN)
-    # -O1 + frame pointers keep ASan stack traces accurate without making the
-    # decode unusably slow. The dynamic ASan runtime is packaged into the APK
-    # by Gradle and preloaded by wrap.sh.
-    set(ASAN_FLAGS -fsanitize=address -fno-omit-frame-pointer -O1)
-    target_compile_options(raw PRIVATE ${ASAN_FLAGS})
-    target_compile_options(hdrstacker PRIVATE ${ASAN_FLAGS})
-    target_link_options(hdrstacker PRIVATE -fsanitize=address)
+    # Guard-page heap: --wrap redirects every malloc-family reference inside
+    # this DSO (LibRaw included) to the guarded implementations. -O1 + frame
+    # pointers keep tombstone stacks accurate.
+    target_sources(hdrstacker PRIVATE guarded-alloc.cpp)
+    set(GUARD_FLAGS -O1 -g -fno-omit-frame-pointer)
+    target_compile_options(raw PRIVATE ${GUARD_FLAGS})
+    target_compile_options(hdrstacker PRIVATE ${GUARD_FLAGS})
+    target_link_options(hdrstacker PRIVATE
+            -Wl,--wrap=malloc
+            -Wl,--wrap=calloc
+            -Wl,--wrap=realloc
+            -Wl,--wrap=free)
 endif()
 
 # ---------------------------------------------------------------------------

@@ -4,60 +4,9 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-// ---------------------------------------------------------------------------
-// AddressSanitizer support for the `asan` build type (see buildTypes below).
-// The instrumented libhdrstacker.so declares the NDK's shared ASan runtime as
-// a library dependency, so the runtime must travel inside the APK for the
-// linker to resolve when the decoder loads; this task stages it into a
-// jniLibs directory keyed by ABI. (No wrap.sh: process start is normal, and
-// ASan initialises lazily on first decode — see PhotoStudioApp.)
-// ---------------------------------------------------------------------------
-val asanRuntimeDir = layout.buildDirectory.dir("asanRuntime")
-
-val packageAsanRuntime = tasks.register("packageAsanRuntime") {
-    description = "Stages the NDK's ASan runtime libraries for the asan variant"
-    val ndkDir = provider { android.ndkDirectory }
-    outputs.dir(asanRuntimeDir)
-    outputs.upToDateWhen { false }
-    doLast {
-        val outRoot = asanRuntimeDir.get().asFile
-        outRoot.deleteRecursively()
-        val toolchains = File(ndkDir.get(), "toolchains/llvm/prebuilt")
-        // NDK versions differ in runtime layout: legacy
-        // lib/clang/*/lib/linux/libclang_rt.asan-<arch>-android.so vs the
-        // per-target <triple>/libclang_rt.asan.so. Match both, and stage each
-        // runtime under BOTH spellings so whichever name the linker recorded
-        // as DT_NEEDED in libhdrstacker.so resolves on-device.
-        // Classify strictly by the arch embedded in the FILE NAME — the full
-        // path always contains "linux-x86_64" (the host prebuilt dir), which
-        // previously mis-bucketed the arm and riscv64 runtimes into x86_64.
-        val runtimeName = Regex("""libclang_rt\.asan-(aarch64|arm|x86_64)-android\.so""")
-        val found = toolchains.walkTopDown()
-            .filter { it.isFile && runtimeName.matches(it.name) }
-            .toList()
-        if (found.isEmpty()) {
-            throw GradleException("No ASan runtime libraries found under $toolchains")
-        }
-        for (lib in found) {
-            val arch = runtimeName.matchEntire(lib.name)!!.groupValues[1]
-            val abi = when (arch) {
-                "aarch64" -> "arm64-v8a"
-                "arm" -> "armeabi-v7a"
-                else -> "x86_64"
-            }
-            val abiDir = File(outRoot, abi).apply { mkdirs() }
-            lib.copyTo(File(abiDir, "libclang_rt.asan-$arch-android.so"), overwrite = true)
-            lib.copyTo(File(abiDir, "libclang_rt.asan.so"), overwrite = true)
-        }
-        val staged = outRoot.walkTopDown().filter { it.isFile }
-            .joinToString { it.relativeTo(outRoot).path }
-        logger.lifecycle("Staged ASan runtimes: $staged")
-    }
-}
-
-tasks.configureEach {
-    if (name == "mergeAsanJniLibFolders") dependsOn(packageAsanRuntime)
-}
+// The `asan` build type (historical name) links a guard-page debugging heap
+// into the native decoder — see cpp/guarded-alloc.cpp. No sanitizer runtime
+// is packaged; the wrapper is resolved entirely at link time.
 
 android {
     namespace = "com.hdrstacker"
@@ -95,10 +44,10 @@ android {
                 "proguard-rules.pro"
             )
         }
-        // Debugging variant with LibRaw + the JNI bridge built under
-        // AddressSanitizer, installable alongside the normal app. Used to
-        // pinpoint the NEF-decode heap overrun on-device with the real files.
-        // The panorama module is not built in this variant.
+        // Debugging variant with the guard-page heap linked into LibRaw + the
+        // JNI bridge, installable alongside the normal app. Used to pinpoint
+        // the NEF-decode heap overrun on-device with the real files. The
+        // panorama module is not built in this variant.
         create("asan") {
             initWith(getByName("debug"))
             applicationIdSuffix = ".asan"
@@ -109,12 +58,6 @@ android {
                     arguments += "-DENABLE_ASAN=ON"
                 }
             }
-        }
-    }
-
-    sourceSets {
-        getByName("asan") {
-            jniLibs.srcDir(asanRuntimeDir)
         }
     }
 
