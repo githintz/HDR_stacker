@@ -23,9 +23,13 @@ class PhotoStudioApp : Application() {
             // abort_on_error=1 makes ASan die via abort() so the system also
             // captures a tombstone — which the app can read back through
             // ApplicationExitInfo even if the report file was never written.
+            // handle_sigill & co. make ASan write its own report file (with
+            // the faulting thread's stack) for hard faults it didn't detect
+            // itself, instead of dying silently.
             Os.setenv(
                 "ASAN_OPTIONS",
                 "verify_asan_link_order=0,abort_on_error=1,log_to_syslog=true," +
+                    "handle_sigill=1,handle_abort=1,handle_sigbus=1,handle_sigfpe=1," +
                     "malloc_context_size=30," +
                     "log_path=${base.filesDir.absolutePath}/asan_report",
                 true,

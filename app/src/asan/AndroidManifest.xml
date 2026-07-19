@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- ASan is incompatible with bionic's tagged heap pointers (arm64 TBI):
+         the tag bits in the top byte break ASan's shadow-memory math and kill
+         the process the moment instrumented code touches the heap. wrap.sh
+         used to disable tagging implicitly for wrapped apps; without it the
+         attribute must be declared explicitly. asan variant only. -->
+    <application android:allowNativeHeapPointerTagging="false" />
+</manifest>

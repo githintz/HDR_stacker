@@ -28,7 +28,10 @@ val packageAsanRuntime = tasks.register("packageAsanRuntime") {
         // per-target <triple>/libclang_rt.asan.so. Match both, and stage each
         // runtime under BOTH spellings so whichever name the linker recorded
         // as DT_NEEDED in libhdrstacker.so resolves on-device.
-        val runtimeName = Regex("""libclang_rt\.asan(-[A-Za-z0-9_]+-android)?\.so""")
+        // Classify strictly by the arch embedded in the FILE NAME — the full
+        // path always contains "linux-x86_64" (the host prebuilt dir), which
+        // previously mis-bucketed the arm and riscv64 runtimes into x86_64.
+        val runtimeName = Regex("""libclang_rt\.asan-(aarch64|arm|x86_64)-android\.so""")
         val found = toolchains.walkTopDown()
             .filter { it.isFile && runtimeName.matches(it.name) }
             .toList()
@@ -36,17 +39,10 @@ val packageAsanRuntime = tasks.register("packageAsanRuntime") {
             throw GradleException("No ASan runtime libraries found under $toolchains")
         }
         for (lib in found) {
-            val path = lib.absolutePath
-            val abi = when {
-                path.contains("aarch64") -> "arm64-v8a"
-                path.contains("x86_64") -> "x86_64"
-                path.contains("i686") || path.contains("i386") -> null // 32-bit x86: unused
-                path.contains("arm") -> "armeabi-v7a"
-                else -> null
-            } ?: continue
-            val arch = when (abi) {
-                "arm64-v8a" -> "aarch64"
-                "armeabi-v7a" -> "arm"
+            val arch = runtimeName.matchEntire(lib.name)!!.groupValues[1]
+            val abi = when (arch) {
+                "aarch64" -> "arm64-v8a"
+                "arm" -> "armeabi-v7a"
                 else -> "x86_64"
             }
             val abiDir = File(outRoot, abi).apply { mkdirs() }
