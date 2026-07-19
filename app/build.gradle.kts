@@ -6,9 +6,11 @@ plugins {
 
 // ---------------------------------------------------------------------------
 // AddressSanitizer support for the `asan` build type (see buildTypes below).
-// The NDK ships the ASan runtime as a shared library that must travel inside
-// the APK so wrap.sh can LD_PRELOAD it; this task stages it into a jniLibs
-// directory keyed by ABI.
+// The instrumented libhdrstacker.so declares the NDK's shared ASan runtime as
+// a library dependency, so the runtime must travel inside the APK for the
+// linker to resolve when the decoder loads; this task stages it into a
+// jniLibs directory keyed by ABI. (No wrap.sh: process start is normal, and
+// ASan initialises lazily on first decode — see PhotoStudioApp.)
 // ---------------------------------------------------------------------------
 val asanRuntimeDir = layout.buildDirectory.dir("asanRuntime")
 
@@ -121,8 +123,8 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
         jniLibs {
-            // Extract native libs to disk on install. Required for wrap.sh
-            // (the asan variant's ASan preloader) to be found and executed.
+            // Extract native libs to disk on install, so the asan variant's
+            // ASan runtime dependency resolves from the app's lib directory.
             useLegacyPackaging = true
         }
     }
