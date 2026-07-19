@@ -20,9 +20,13 @@ class PhotoStudioApp : Application() {
     override fun attachBaseContext(base: Context) {
         super.attachBaseContext(base)
         runCatching {
+            // abort_on_error=1 makes ASan die via abort() so the system also
+            // captures a tombstone — which the app can read back through
+            // ApplicationExitInfo even if the report file was never written.
             Os.setenv(
                 "ASAN_OPTIONS",
-                "verify_asan_link_order=0,log_to_syslog=true,malloc_context_size=30," +
+                "verify_asan_link_order=0,abort_on_error=1,log_to_syslog=true," +
+                    "malloc_context_size=30," +
                     "log_path=${base.filesDir.absolutePath}/asan_report",
                 true,
             )

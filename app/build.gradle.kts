@@ -14,24 +14,48 @@ plugins {
 // ---------------------------------------------------------------------------
 val asanRuntimeDir = layout.buildDirectory.dir("asanRuntime")
 
-val packageAsanRuntime = tasks.register<Copy>("packageAsanRuntime") {
+val packageAsanRuntime = tasks.register("packageAsanRuntime") {
     description = "Stages the NDK's ASan runtime libraries for the asan variant"
-    from(provider {
-        fileTree("${android.ndkDirectory}/toolchains/llvm/prebuilt") {
-            include("**/libclang_rt.asan-*-android.so")
+    val ndkDir = provider { android.ndkDirectory }
+    outputs.dir(asanRuntimeDir)
+    outputs.upToDateWhen { false }
+    doLast {
+        val outRoot = asanRuntimeDir.get().asFile
+        outRoot.deleteRecursively()
+        val toolchains = File(ndkDir.get(), "toolchains/llvm/prebuilt")
+        // NDK versions differ in runtime layout: legacy
+        // lib/clang/*/lib/linux/libclang_rt.asan-<arch>-android.so vs the
+        // per-target <triple>/libclang_rt.asan.so. Match both, and stage each
+        // runtime under BOTH spellings so whichever name the linker recorded
+        // as DT_NEEDED in libhdrstacker.so resolves on-device.
+        val runtimeName = Regex("""libclang_rt\.asan(-[A-Za-z0-9_]+-android)?\.so""")
+        val found = toolchains.walkTopDown()
+            .filter { it.isFile && runtimeName.matches(it.name) }
+            .toList()
+        if (found.isEmpty()) {
+            throw GradleException("No ASan runtime libraries found under $toolchains")
         }
-    })
-    into(asanRuntimeDir)
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-    includeEmptyDirs = false
-    eachFile {
-        val abi = when {
-            name.contains("aarch64") -> "arm64-v8a"
-            name.contains("-arm-") -> "armeabi-v7a"
-            name.contains("x86_64") -> "x86_64"
-            else -> null
+        for (lib in found) {
+            val path = lib.absolutePath
+            val abi = when {
+                path.contains("aarch64") -> "arm64-v8a"
+                path.contains("x86_64") -> "x86_64"
+                path.contains("i686") || path.contains("i386") -> null // 32-bit x86: unused
+                path.contains("arm") -> "armeabi-v7a"
+                else -> null
+            } ?: continue
+            val arch = when (abi) {
+                "arm64-v8a" -> "aarch64"
+                "armeabi-v7a" -> "arm"
+                else -> "x86_64"
+            }
+            val abiDir = File(outRoot, abi).apply { mkdirs() }
+            lib.copyTo(File(abiDir, "libclang_rt.asan-$arch-android.so"), overwrite = true)
+            lib.copyTo(File(abiDir, "libclang_rt.asan.so"), overwrite = true)
         }
-        if (abi == null) exclude() else path = "$abi/$name"
+        val staged = outRoot.walkTopDown().filter { it.isFile }
+            .joinToString { it.relativeTo(outRoot).path }
+        logger.lifecycle("Staged ASan runtimes: $staged")
     }
 }
 

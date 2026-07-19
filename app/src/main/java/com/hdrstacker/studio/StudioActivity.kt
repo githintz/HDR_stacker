@@ -1,6 +1,8 @@
 package com.hdrstacker.studio
 
 import android.Manifest
+import android.app.ActivityManager
+import android.app.ApplicationExitInfo
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -103,11 +105,15 @@ class StudioActivity : ComponentActivity() {
                     },
                 )
 
-                // AddressSanitizer report catcher (asan build type). If the
-                // native decoder tripped ASan on the previous run, the report
-                // was written to filesDir by wrap.sh's log_path; surface it so
-                // it can be copied out without adb. No-op in normal builds.
-                var asanReport by remember { mutableStateOf(readAsanReports()) }
+                // Native crash catcher. Prefers an AddressSanitizer report
+                // file (asan build type, written via ASAN_OPTIONS log_path);
+                // falls back to the tombstone of the last native crash via
+                // ApplicationExitInfo, which the system records even when
+                // ASan couldn't write its file. No-op in normal, crash-free
+                // runs.
+                var asanReport by remember {
+                    mutableStateOf(readAsanReports() ?: readLastNativeCrash())
+                }
                 asanReport?.let { report ->
                     AsanReportDialog(
                         report = report,
@@ -137,6 +143,61 @@ class StudioActivity : ComponentActivity() {
     private fun deleteAsanReports() {
         filesDir.listFiles { f -> f.isFile && f.name.startsWith("asan_report") }
             ?.forEach { it.delete() }
+    }
+
+    /**
+     * Reads the system's record of this app's most recent native crash
+     * (signal, abort message, backtrace) and renders the printable parts of
+     * its tombstone. Each crash is only surfaced once.
+     */
+    private fun readLastNativeCrash(): String? {
+        if (Build.VERSION.SDK_INT < 30) return null
+        val am = getSystemService(ActivityManager::class.java) ?: return null
+        val exits = runCatching { am.getHistoricalProcessExitReasons(packageName, 0, 5) }
+            .getOrNull() ?: return null
+        val prefs = getSharedPreferences("crash_reporter", MODE_PRIVATE)
+        val lastShown = prefs.getLong("last_shown_crash_ts", 0L)
+        val crash = exits.firstOrNull {
+            it.timestamp > lastShown && (
+                it.reason == ApplicationExitInfo.REASON_CRASH_NATIVE ||
+                    it.reason == ApplicationExitInfo.REASON_CRASH ||
+                    it.reason == ApplicationExitInfo.REASON_SIGNALED
+                )
+        } ?: return null
+        prefs.edit().putLong("last_shown_crash_ts", crash.timestamp).apply()
+
+        val sb = StringBuilder()
+        sb.append("Process exit (reason=${crash.reason}): ")
+            .append(crash.description ?: "no description")
+            .append("\nat ").append(java.util.Date(crash.timestamp)).append("\n\n")
+        runCatching {
+            crash.traceInputStream?.use { stream ->
+                val bytes = stream.readBytes()
+                sb.append(extractPrintable(bytes, maxOut = 80_000))
+            }
+        }
+        return sb.toString()
+    }
+
+    /** Pulls readable text (e.g. the ASan report / abort message and frame
+     *  names) out of a binary tombstone stream. */
+    private fun extractPrintable(bytes: ByteArray, maxOut: Int): String {
+        val out = StringBuilder()
+        val run = StringBuilder()
+        for (b in bytes) {
+            val c = b.toInt().toChar()
+            if (c == '\n' || c.code in 32..126) {
+                run.append(c)
+            } else {
+                if (run.length >= 6) {
+                    out.append(run).append('\n')
+                    if (out.length > maxOut) return out.toString()
+                }
+                run.setLength(0)
+            }
+        }
+        if (run.length >= 6 && out.length <= maxOut) out.append(run)
+        return out.toString()
     }
 
     override fun onResume() {
