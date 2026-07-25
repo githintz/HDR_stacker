@@ -273,8 +273,9 @@ private fun OptionsCard(
                 Column(Modifier.weight(1f)) {
                     Text("Diagnostic mode", style = MaterialTheme.typography.bodyMedium)
                     Text(
-                        "Also saves each decoded and aligned frame to the gallery " +
-                            "so you can see where an artifact starts.",
+                        "Saves each decoded and aligned frame to the gallery, and " +
+                            "verifies frame memory between stages — stops with a " +
+                            "message naming the exact stage if corruption is detected.",
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }

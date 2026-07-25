@@ -79,7 +79,18 @@ if(ENABLE_ASAN)
             -Wl,--wrap=malloc
             -Wl,--wrap=calloc
             -Wl,--wrap=realloc
-            -Wl,--wrap=free)
+            -Wl,--wrap=free
+            # C++ operator new/delete by mangled name (LP64 + ILP32).
+            -Wl,--wrap=_Znwm
+            -Wl,--wrap=_Znam
+            -Wl,--wrap=_Znwj
+            -Wl,--wrap=_Znaj
+            -Wl,--wrap=_ZdlPv
+            -Wl,--wrap=_ZdaPv
+            -Wl,--wrap=_ZdlPvm
+            -Wl,--wrap=_ZdaPvm
+            -Wl,--wrap=_ZdlPvj
+            -Wl,--wrap=_ZdaPvj)
 endif()
 
 # ---------------------------------------------------------------------------

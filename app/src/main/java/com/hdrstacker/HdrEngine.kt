@@ -13,8 +13,10 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.opencv.android.OpenCVLoader
 import org.opencv.android.Utils
+import org.opencv.core.Core
 import org.opencv.core.CvType
 import org.opencv.core.Mat
+import org.opencv.core.MatOfDouble
 import org.opencv.imgproc.Imgproc
 import org.opencv.photo.Photo
 import java.text.SimpleDateFormat
@@ -84,6 +86,11 @@ object HdrEngine {
             // for a decoder overrun to corrupt (the int[] results live on the
             // managed JVM heap, separate from the native malloc heap).
             val decodedFrames = arrayOfNulls<DecodedImage>(sources.size)
+            // Diagnostic integrity trace: checksum every decoded frame and
+            // re-verify ALL earlier frames after each subsequent decode. If a
+            // decode clobbers a sibling frame's memory (the moving-victim
+            // corruption), this pinpoints the exact perpetrator and victim.
+            val decodeChecksums = LongArray(sources.size)
             sources.forEachIndexed { index, uri ->
                 coroutineContext.ensureActive()
                 onProgress(index / (sources.size + 2f), "Decoding frame ${index + 1}/${sources.size}")
@@ -95,12 +102,32 @@ object HdrEngine {
                     ?: error("Not a decodable RAW: $uri")
                 decodedFrames[index] = d
                 shutters[index] = d.shutter
+
+                if (diagnostic) {
+                    for (j in 0 until index) {
+                        val earlier = decodedFrames[j] ?: continue
+                        val now = checksum(earlier.pixels)
+                        if (now != decodeChecksums[j]) {
+                            error(
+                                "CORRUPTION LOCALISED: decoded frame ${j + 1} changed " +
+                                    "in memory while decoding frame ${index + 1}",
+                            )
+                        }
+                    }
+                    decodeChecksums[index] = checksum(d.pixels)
+                }
             }
 
             // ---- 1b. Convert the decoded buffers to Mats (no RAW decoding here) ----
             for (index in decodedFrames.indices) {
                 coroutineContext.ensureActive()
                 val d = decodedFrames[index]!!
+                if (diagnostic && checksum(d.pixels) != decodeChecksums[index]) {
+                    error(
+                        "CORRUPTION LOCALISED: decoded frame ${index + 1} changed " +
+                            "in memory between decode and conversion",
+                    )
+                }
                 val bmp = Bitmap.createBitmap(d.pixels, d.width, d.height, Bitmap.Config.ARGB_8888)
                 decodedFrames[index] = null       // drop the int[] as soon as it's copied
                 val rgba = Mat()
@@ -130,6 +157,10 @@ object HdrEngine {
             // keeps every buffer independently owned.
             coroutineContext.ensureActive()
             onProgress(sources.size / (sources.size + 2f), "Aligning frames")
+            // Diagnostic: statistical fingerprints of every source Mat, plus
+            // of each aligned result, re-verified after every align step to
+            // localise corruption to a specific operation and victim.
+            val sourceSigs = if (diagnostic) mats.map { matSignature(it) } else emptyList()
             run {
                 val align = Photo.createAlignMTB()
                 // calculateShift requires single-channel input, so compute the
@@ -137,7 +168,9 @@ object HdrEngine {
                 val refGray = Mat()
                 Imgproc.cvtColor(mats[0], refGray, Imgproc.COLOR_RGB2GRAY)
                 val aligned = ArrayList<Mat>(mats.size)
+                val alignedSigs = ArrayList<List<Double>>(mats.size)
                 aligned.add(mats[0].clone())                // reference: unshifted
+                if (diagnostic) alignedSigs.add(matSignature(aligned[0]))
                 for (i in 1 until mats.size) {
                     coroutineContext.ensureActive()
                     val gray = Mat()
@@ -147,12 +180,32 @@ object HdrEngine {
                     val shifted = Mat()
                     align.shiftMat(mats[i], shifted, shift)  // shift the colour frame
                     aligned.add(shifted)
+                    if (diagnostic) {
+                        alignedSigs.add(matSignature(shifted))
+                        for (k in mats.indices) {
+                            if (matSignature(mats[k]) != sourceSigs[k]) {
+                                error(
+                                    "CORRUPTION LOCALISED: source frame ${k + 1} " +
+                                        "changed while aligning frame ${i + 1}",
+                                )
+                            }
+                        }
+                        for (k in 0 until aligned.size - 1) {
+                            if (matSignature(aligned[k]) != alignedSigs[k]) {
+                                error(
+                                    "CORRUPTION LOCALISED: aligned frame ${k + 1} " +
+                                        "changed while aligning frame ${i + 1}",
+                                )
+                            }
+                        }
+                    }
                 }
                 refGray.release()
                 mats.forEach { it.release() }
                 mats.clear()
                 mats.addAll(aligned)
             }
+            val alignedFinalSigs = if (diagnostic) mats.map { matSignature(it) } else emptyList()
 
             if (diagnostic) {
                 mats.forEachIndexed { i, m -> dumpMat(context, m, "HDRDIAG_2aligned_$i") }
@@ -165,6 +218,16 @@ object HdrEngine {
             val result8 = when (mode) {
                 FusionMode.EXPOSURE_FUSION -> mertens(mats)
                 FusionMode.DEBEVEC_HDR -> debevec(mats, resolveExposureTimes(shutters))
+            }
+            if (diagnostic) {
+                for (k in mats.indices) {
+                    if (matSignature(mats[k]) != alignedFinalSigs[k]) {
+                        error(
+                            "CORRUPTION LOCALISED: aligned frame ${k + 1} changed " +
+                                "during the $mode merge",
+                        )
+                    }
+                }
             }
 
             // ---- 4. Encode to a Bitmap and save to the gallery ----
@@ -234,6 +297,24 @@ object HdrEngine {
         if (isEmpty()) return true
         val s = this[0].size()
         return all { it.size() == s }
+    }
+
+    /** Order-sensitive checksum of a decoded frame's pixels. */
+    private fun checksum(pixels: IntArray): Long {
+        var h = 1125899906842597L
+        for (v in pixels) h = 31 * h + v
+        return h
+    }
+
+    /** Cheap statistical fingerprint of a Mat (per-channel mean + stddev). */
+    private fun matSignature(m: Mat): List<Double> {
+        val mean = MatOfDouble()
+        val std = MatOfDouble()
+        Core.meanStdDev(m, mean, std)
+        val sig = mean.toArray().toList() + std.toArray().toList()
+        mean.release()
+        std.release()
+        return sig
     }
 
     /**
