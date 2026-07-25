@@ -57,8 +57,21 @@ Java_com_hdrstacker_NativeHdr_decodeNef(JNIEnv *env, jobject /*thiz*/,
         return nullptr;
     }
 
-    jbyte *raw = env->GetByteArrayElements(nefBytes, nullptr);
-    if (raw == nullptr) return nullptr;
+    // Copy the NEF into NATIVE memory before decoding. LibRaw reads the
+    // buffer progressively for seconds while it decompresses rows; a pointer
+    // obtained via GetByteArrayElements lives in (or mirrors) ART-managed
+    // memory, and Android's moving/compacting concurrent GC relocating the
+    // array mid-decode makes LibRaw read stale bytes — producing frames that
+    // are perfect down to some row and garbage below it, on a random frame
+    // each run. A private native copy is immune by construction.
+    std::vector<jbyte> nef(static_cast<size_t>(len));
+    env->GetByteArrayRegion(nefBytes, 0, len, nef.data());
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        LOGE("failed to copy NEF bytes to native memory");
+        return nullptr;
+    }
+    const jbyte *raw = nef.data();
 
     LibRaw processor;
 
@@ -75,7 +88,7 @@ Java_com_hdrstacker_NativeHdr_decodeNef(JNIEnv *env, jobject /*thiz*/,
 
     jobject result = nullptr;
     do {
-        int rc = processor.open_buffer(raw, static_cast<size_t>(len));
+        int rc = processor.open_buffer(const_cast<jbyte *>(raw), static_cast<size_t>(len));
         if (rc != LIBRAW_SUCCESS) {
             LOGE("open_buffer failed: %s", libraw_strerror(rc));
             break;
@@ -127,6 +140,5 @@ Java_com_hdrstacker_NativeHdr_decodeNef(JNIEnv *env, jobject /*thiz*/,
     } while (false);
 
     processor.recycle();
-    env->ReleaseByteArrayElements(nefBytes, raw, JNI_ABORT);  // we didn't modify it
     return result;
 }

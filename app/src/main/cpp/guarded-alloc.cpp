@@ -104,16 +104,26 @@ void checkCanaryAndRelease(void *ptr, const GuardInfo &info) {
 }  // namespace
 
 extern "C" void *__wrap_malloc(size_t size) {
+    if (tlsBypass) return __real_malloc(size);
     return guardedAlloc(size);
 }
 
 extern "C" void *__wrap_calloc(size_t n, size_t size) {
     if (size != 0 && n > SIZE_MAX / size) return nullptr;
+    if (tlsBypass) return __real_calloc(n, size);
     return guardedAlloc(n * size);  // fresh mmap memory is already zeroed
 }
 
 extern "C" void __wrap_free(void *ptr) {
     if (ptr == nullptr) return;
+    // Registry teardown (map node deallocation inside the locked region below)
+    // re-enters this function; without the bypass short-circuit that nested
+    // call deadlocks on gLock. Bypass-allocated nodes are __real_malloc'd, so
+    // forwarding straight to __real_free is also the correct pairing.
+    if (tlsBypass) {
+        __real_free(ptr);
+        return;
+    }
     GuardInfo info;
     {
         std::lock_guard<std::mutex> lock(gLock);

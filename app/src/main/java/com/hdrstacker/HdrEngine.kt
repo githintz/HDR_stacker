@@ -129,6 +129,14 @@ object HdrEngine {
                     )
                 }
                 val bmp = Bitmap.createBitmap(d.pixels, d.width, d.height, Bitmap.Config.ARGB_8888)
+                if (diagnostic) {
+                    // Saved via pure framework code, before ANY OpenCV
+                    // involvement: if this dump shows corruption, the decoder
+                    // produced it; if this is clean but 1decoded (post-Mat)
+                    // is corrupt, the OpenCV conversion did it.
+                    runCatching { saveToGallery(context, bmp, "HDRDIAG_0javapixels_$index") }
+                        .onFailure { Log.e(TAG, "diagnostic dump failed for frame $index", it) }
+                }
                 decodedFrames[index] = null       // drop the int[] as soon as it's copied
                 val rgba = Mat()
                 Utils.bitmapToMat(bmp, rgba)      // CV_8UC4, RGBA
